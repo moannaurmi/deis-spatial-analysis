@@ -1,0 +1,20 @@
+DEIS Spatial Analysis — Environment
+
+PostgreSQL: 16
+PostGIS: 3.6.2
+pgAdmin: 4
+Python: 3.9.6
+openpyxl: 3.1.5
+ogr2ogr: PostGIS 3.6.2 (via Homebrew)
+QGIS: (to be added)
+
+Operating System: macOS (Apple MacBook Air)
+
+Data sources:
+- CSO Small Area boundaries 2022 — data.gov.ie
+- CSO Electoral Division boundaries 2022 — data.gov.ie
+- Pobal HP Deprivation Index 2022 — data.gov.ie
+- DEIS post-primary schools list — gov.ie (Department of Education)
+- Post-primary schools locations 2016 — compiled manually from data.gov.ie
+
+Coordinate reference system: EPSG:2157 (Irish Transverse Mercator)
