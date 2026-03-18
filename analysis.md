@@ -1,5 +1,5 @@
 # DEIS Spatial Analysis
-## Spatial inequality in school access: coverage of DEIS schools across deprived small areas in Ireland
+## Spatial inequality in school access: coverage of DEIS post-primary schools across deprived small areas in Ireland
 
 ### Research Question
 What proportion of Ireland's most deprived small areas are within 5km of a DEIS post-primary school, and does the spatial pattern suggest effective policy targeting?
@@ -36,24 +36,30 @@ What proportion of Ireland's most deprived small areas are within 5km of a DEIS 
 
 ---
 
-## Data Cleaning
-- CSO Small Area GeoPackage contained three copies of each boundary at different generalisation levels — filtered to unique small areas using DISTINCT ON retaining lowest objectid
-- GeoPackage also contained non-small-area boundaries — filtered to records where LENGTH(sa_geogid_2022) = 10
-- Result: 16,837 unique small areas
-- Geometry columns renamed from shape to geom for consistency
-- School coordinates converted from WGS84 to ITM EPSG:2157 using ST_Transform
-- 227 of 232 DEIS schools matched to location dataset (97.8%)
+## Data Cleaning and Row Count Tracking
+
+All analyses use **small_areas2 as the canonical base table (16,837 rows)**. The following table tracks every reduction step explicitly:
+
+| Stage | Table | Rows | Notes |
+|---|---|---|---|
+| Raw GeoPackage load | sa_boundaries | 56,757 | Three generalisation levels + other boundary types mixed together |
+| Filter to SA codes only | — | 50,511 | WHERE LENGTH(sa_geogid_2022) = 10 |
+| Remove duplicate generalisation levels | small_areas_clean | 16,837 | DISTINCT ON retaining lowest objectid |
+| Add centroid column | small_areas_clean | 16,837 | ST_Centroid(geom) |
+| Spatial containment join (final) | small_areas2 | 16,837 | One row per small area, DISTINCT ON |
+| Unmatched after spatial join | — | 74 | Centroids on ED boundaries — geometric ambiguity |
+| Final matched rows with deprivation | — | 16,763 | small_areas2 minus 74 unmatched — used for all deprivation analyses |
 
 ### Deprivation Join Method
 - Deprivation index is at Electoral Division level — codes do not directly match small area codes
-- Primary method: spatial containment join — small area centroids spatially joined to ED boundary polygons, then deprivation scores assigned by ED name match
-- Some centroids fell on ED boundaries — resolved using DISTINCT ON to retain one match per small area
-- Match rate: 19,970 of 20,044 small areas matched (99.6%)
-- Validation: name-based join produced virtually identical results (<0.1% difference), confirming robustness of both approaches
+- Method: spatial containment join — small area centroids are spatially joined to ED boundary polygons. Once a small area centroid is confirmed to fall within an ED polygon, the deprivation attributes of that ED are directly inherited. No secondary name matching is required — the spatial relationship determines the match entirely.
+- A small number of small area centroids fell on or very near ED boundaries, creating geometric ambiguity. The correct alternative — polygon-to-polygon intersection — introduces its own problem: small areas that physically span multiple EDs would receive ambiguous or averaged deprivation scores, as there is no principled way to assign a single ED's attributes to a small area that overlaps several. The centroid approach avoids this by assigning each small area to exactly one ED based on where its centre falls. Boundary cases are handled pragmatically using DISTINCT ON, retaining the match with a non-null deprivation score where multiple candidates exist. This is acknowledged as a limitation — 74 small areas (0.4%) remain unmatched.
+- Validation: a name-based join was run in parallel and produced virtually identical deprivation category distributions (<0.1% difference), confirming the spatial approach is robust.
 
 ---
 
 ## Database Tables
+
 | Table | Description | Rows |
 |---|---|---|
 | sa_boundaries | Raw CSO small area boundaries | 56,757 |
@@ -61,7 +67,7 @@ What proportion of Ireland's most deprived small areas are within 5km of a DEIS 
 | ed_boundaries | CSO Electoral Division boundaries | 3,420 |
 | deprivation_raw | Raw Pobal CSV (all columns as text) | 3,417 |
 | deprivation | Cleaned deprivation data | 3,417 |
-| small_areas2 | Main working table (spatial join) | 16,837 |
+| small_areas2 | Canonical working table (spatial join) | 16,837 |
 | schools_raw | Raw schools data | 711 |
 | schools | Schools with PostGIS geometry and DEIS flag | 711 |
 | deis_raw | Raw DEIS schools list | 232 |
@@ -115,13 +121,15 @@ Total focus areas (Very + Extremely Disadvantaged): 161 small areas
 | Cavan | 2 |
 | Laois | 2 |
 
-Notable: Donegal has 19 DEIS schools despite being a predominantly rural county.
+Notable: Donegal has 19 DEIS schools despite being a predominantly rural county — the third highest count nationally after Dublin and Cork. The reason for this is not established by this analysis. Two hypotheses present themselves: Donegal consistently ranks among Ireland's most deprived counties on multiple socioeconomic indicators, which could reflect genuine need; alternatively, the county's dispersed settlement pattern may have led to more individual school designations rather than concentrated urban clusters. These are hypotheses only — testing them would require historical DEIS designation data and school-level socioeconomic indicators. What can be said is that if Donegal's deprivation is real but geographically dispersed, it would be precisely the kind of county most exposed to the rural accessibility gap identified in Analyses 6 and 8 — deprived, rural, and reliant on a school network spread across a large geographic area. This connects Donegal directly to the central finding of this analysis rather than treating it as an anomaly.
 
 ---
 
 ## Analysis 3 — Extremely Deprived Areas Per County
 
-Only Limerick City has extremely disadvantaged small areas: 7 total. All extreme deprivation is concentrated in one city — likely an artefact of ED-level aggregation diluting urban deprivation pockets elsewhere.
+Only Limerick City has extremely disadvantaged small areas: 7 total.
+
+**Important caveat:** This figure should be treated with significant caution. The Pobal deprivation index is available at Electoral Division level only — true small area level data requires a license from the authors. When deprivation scores are averaged up to ED level, pockets of extreme deprivation within larger EDs are diluted and may not cross the threshold into the "Extremely Disadvantaged" category. The true number of extremely disadvantaged small areas in Ireland is almost certainly higher than 7. This is the most significant data limitation in this analysis and affects the interpretation of all findings related to the most deprived areas. All conclusions about "Extremely Disadvantaged" areas should be read with this constraint in mind.
 
 ---
 
@@ -136,7 +144,7 @@ Only Limerick City has extremely disadvantaged small areas: 7 total. All extreme
 | Extremely Disadvantaged | 1.49 | 1.84 |
 | Very Disadvantaged | 1.15 | 1.71 |
 
-Key finding: most deprived areas are closest to DEIS schools — suggests policy targeting is working. Note: averages hide rural outliers — see median analysis below.
+Key finding: the most deprived areas are geographically closest to DEIS schools, while average and affluent areas are furthest away. This pattern is consistent with effective spatial targeting of DEIS provision. Note: averages mask significant rural variation — see median analysis below for a more robust picture.
 
 ---
 
@@ -151,11 +159,13 @@ Key finding: most deprived areas are closest to DEIS schools — suggests policy
 | Disadvantaged | 0.98 | 3.62 |
 | Very Disadvantaged | 0.67 | 1.01 |
 
-Key finding: Very Disadvantaged areas have a median of just 0.67km — half are within walking distance of a DEIS school. The high 75th percentile for average areas (11.84km) reflects rural areas creating heavy tails in the average.
+Key finding: the median distance for Very Disadvantaged areas is just 0.67km — half of all very disadvantaged small areas are within walking distance of a DEIS school. The tight interquartile range (0.67km median, 1.01km at 75th percentile) indicates this is a consistent pattern rather than an average driven by a few urban clusters. By contrast, the wide spread for average areas (5.26km median, 11.84km at 75th percentile) reveals the rural accessibility problem — a quarter of average small areas are more than 12km from any DEIS school.
 
 ---
 
 ## Analysis 5 — Coverage by Deprivation Category (5km buffer)
+
+**Note on totals:** Area counts here differ slightly from Analysis 1 because coverage2 excludes the 74 small areas with no deprivation match. All analyses from Analysis 4 onwards use small_areas2 as the canonical base.
 
 | Category | Total | Covered | Coverage % |
 |---|---|---|---|
@@ -166,31 +176,33 @@ Key finding: Very Disadvantaged areas have a median of just 0.67km — half are 
 | Marginally Above Average | 7,031 | 4,033 | 57.4% |
 | Marginally Below Average | 7,042 | 3,640 | 51.7% |
 
-Key finding: 100% of extremely disadvantaged and 96.1% of very disadvantaged areas are within 5km of a DEIS school.
+Key finding: coverage decreases as deprivation decreases — the most deprived areas are best served by DEIS schools at the 5km threshold. The 100% figure for extremely disadvantaged areas should be treated as illustrative given the very small sample size (7 areas) and the ED aggregation issue described in Analysis 3. The 96.1% figure for Very Disadvantaged is more statistically meaningful. The gap between deprived areas (96.1%) and average areas (roughly 50%) is the clearest evidence of effective spatial targeting in this dataset.
 
 ---
 
 ## Analysis 6 — County Coverage Gap
 
-| County | Deprived Areas | Covered | Coverage % |
-|---|---|---|---|
-| Limerick (county) | 4 | 0 | 0% |
-| Mayo | 2 | 0 | 0% |
-| Waterford City | 9 | 9 | 100% |
-| Limerick City | 58 | 58 | 100% |
-| Dublin City | 30 | 30 | 100% |
-| South Dublin | 24 | 24 | 100% |
-| Cork City | 34 | 34 | 100% |
+Note: Ireland's administrative geography separates some cities from their surrounding counties as distinct units. The table below reflects this — city and county figures are not directly comparable and should not be aggregated without care.
 
-Key finding: clear urban-rural divide — all urban deprived areas have 100% coverage, rural deprived areas have zero coverage. Note: Limerick county and Limerick City are separate administrative units.
+| Administrative Unit | Type | Deprived Areas | Covered | Coverage % |
+|---|---|---|---|---|
+| Limerick (county) | County | 4 | 0 | 0% |
+| Mayo | County | 2 | 0 | 0% |
+| Waterford City | City | 9 | 9 | 100% |
+| Limerick City | City | 58 | 58 | 100% |
+| Dublin City | City | 30 | 30 | 100% |
+| South Dublin | County | 24 | 24 | 100% |
+| Cork City | City | 34 | 34 | 100% |
+
+Key finding: within this dataset, every deprived urban area is covered and no deprived rural area is covered at the 5km threshold. The sample of uncovered areas is small (6 small areas across 2 counties) so this should be treated as a directional finding rather than a definitive pattern — but it is consistent with the distance data in Analysis 4 and 5 and points to a meaningful urban-rural dimension in DEIS accessibility.
 
 ---
 
 ## Analysis 7 — Population Weighted Coverage
 
-**98.5%** of people living in extremely or very disadvantaged areas are within 5km of a DEIS post-primary school.
+98.5% of people living in extremely or very disadvantaged areas are within 5km of a DEIS post-primary school.
 
-This is the headline statistic for the project — robust across both join methods.
+**Interpretive note:** This figure should be treated as indicative rather than definitive. As noted in Analysis 3, the "Extremely Disadvantaged" category contains only 7 small areas due to ED-level aggregation — the true population in extreme deprivation is almost certainly larger. The 96.1% coverage figure for Very Disadvantaged areas is the more statistically reliable finding. The 98.5% population-weighted figure is directionally correct but would require true small area deprivation data to confirm precisely.
 
 ---
 
@@ -205,14 +217,50 @@ This is the headline statistic for the project — robust across both join metho
 | A127123004 | Limerick | 10.66 | 1,408 |
 | A127123003 | Limerick | 10.54 | 1,408 |
 
-Key finding: 6 deprived small areas have no DEIS school within 5km. Mayo areas are most isolated at 16.2km. The 4 Limerick county areas likely represent the same Electoral Division split across multiple small areas — combined approximately 1,680 people without accessible DEIS provision.
+Key finding: 6 deprived small areas have no DEIS school within 5km. The two Mayo areas are the most isolated nationally at 16.2km and 11.5km respectively. The four Limerick county areas share an identical population figure of 1,408 — this is not coincidental. In the CSO small area system, a single Electoral Division is subdivided into multiple small areas, all of which inherit the same ED-level population figure. These four small areas are therefore confirmed to be subdivisions of a single ED, representing one community of approximately 1,408 people. Combined with the two Mayo areas, this analysis identifies roughly 1,680 people in deprived areas with no DEIS post-primary school within a straight-line distance of 5km.
 
 ---
 
 ## Limitations
-- Deprivation data is at Electoral Division level not Small Area level — true small area data requires a license from the authors. ED-level aggregation likely dilutes extreme deprivation in urban areas.
+
+### Data Limitations
+- Deprivation data is at Electoral Division level not Small Area level — true small area data requires a license from the authors. ED-level aggregation likely dilutes extreme deprivation in urban and rural areas alike.
+- DEIS school designation uses different methodology to the Pobal deprivation index — they measure different things and don't perfectly align. Some counties with DEIS schools (e.g. Leitrim) do not appear in the deprived small areas analysis, suggesting ED-level data may undercount rural disadvantage.
 - School location data is from 2016 — some schools may have opened, closed, or moved since then.
+- Population figures are from 2016 and may not reflect current demographics — some areas will have grown or shrunk significantly.
+- School capacity is not accounted for — a DEIS school within 5km may be oversubscribed.
 - 74 small areas (0.4%) have no deprivation score due to centroids falling on ED boundaries.
 - 5 DEIS schools from the Department of Education list could not be matched to the schools location dataset.
-- 5km buffer threshold is a methodological choice justified by typical rural post-primary travel distance.
-- County comparison mixes cities and counties as separate administrative units — interpret carefully.
+
+### Methodological Limitations
+- Distance is measured as straight-line (Euclidean) not road distance — 5km as the crow flies could be significantly longer by road, particularly in rural areas with limited road networks. This likely means rural coverage is overstated.
+- Centroid-based distance assumes everyone in a small area lives at its centre — in large rural small areas this could introduce significant error.
+- The 5km buffer threshold is a methodological choice not empirically derived. It assumes access to transport — in areas without a car, even 3km could be a meaningful barrier.
+- County comparison mixes cities and counties as separate administrative units (e.g. Limerick City vs Limerick county) — interpret carefully.
+
+### Coverage Limitations
+- Only post-primary DEIS schools are analysed — primary DEIS schools are excluded.
+- School transport schemes are not accounted for — these extend the effective reach of schools significantly in rural areas and could change coverage figures substantially.
+- Northern Ireland is excluded entirely — cross-border patterns are not captured.
+- Analysis covers the Republic of Ireland only using 2022 small area boundaries.
+
+---
+
+## Future Work
+
+### Immediate Extensions
+- **Road distance analysis** — replace straight-line distances with road network distances using OSM (OpenStreetMap) data and pgRouting. This would give a more accurate picture of rural accessibility and likely reduce coverage figures for remote areas.
+- **Age-weighted coverage** — incorporate CSO 2022 small area age breakdown to weight coverage by the proportion of 12-18 year olds in each area, giving a more accurate picture of post-primary school accessibility.
+- **3km and 10km sensitivity analysis** — rerun all coverage analyses at alternative buffer thresholds to test robustness of findings.
+
+### Deeper Investigation
+- **The Limerick concentration** — all 7 extremely disadvantaged small areas are in Limerick City. This warrants deeper investigation — is it a data artefact of ED-level aggregation or a genuine concentration of extreme deprivation? True small area deprivation data would resolve this.
+- **Donegal anomaly** — Donegal has 19 DEIS schools despite being predominantly rural. Investigating whether this reflects genuine deprivation patterns or historical policy decisions would require historical DEIS designation data and school-level socioeconomic indicators.
+- **DEIS vs non-DEIS comparison** — a more detailed analysis of whether deprived areas are proportionally better served by DEIS schools relative to affluent areas, controlling for overall school density.
+
+### Broader Research Questions
+- **Temporal analysis** — how has DEIS school placement changed over time? Are new DEIS designations being placed in areas of greatest need?
+- **Transport integration** — incorporating Bus Éireann and school transport scheme routes to model effective rather than geometric accessibility.
+- **Primary school analysis** — extending the analysis to DEIS primary schools to give a full picture of DEIS coverage across the education system.
+- **Cross-border analysis** — extending the study to include Northern Ireland to capture cross-border patterns, particularly relevant in border counties.
+- **Small area deprivation data** — repeating the analysis with true small area level deprivation data (available on license from the authors) to validate findings and potentially reveal deprivation pockets hidden by ED-level aggregation.
