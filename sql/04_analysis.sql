@@ -143,3 +143,84 @@ JOIN small_areas2 sa ON c.sa_geogid_2022 = sa.sa_geogid_2022
 WHERE c.deprivation_category IN ('Extremely Disadvantaged', 'Very Disadvantaged')
 AND c.covered_by_deis = FALSE
 ORDER BY d.nearest_deis_distance_km DESC;
+
+-- ANALYSIS 9: Join quality audit
+-- Measures match rate between small areas and deprivation data
+SELECT
+  COUNT(*) AS total_small_areas,
+  COUNT(deprivation_score) AS matched_with_deprivation,
+  COUNT(*) - COUNT(deprivation_score) AS unmatched,
+  ROUND(
+    100.0 * COUNT(deprivation_score) / COUNT(*), 1
+  ) AS match_rate_pct
+FROM small_areas2;
+-- Result: 16,837 total, 16,763 matched, 74 unmatched, 99.6% match rate
+
+-- ANALYSIS 10: Duplicate ED name check
+-- Identifies ED names appearing in multiple counties in deprivation table
+-- These create ambiguity in the name-based join stage
+SELECT ed_english, COUNT(*) AS occurrences
+FROM deprivation
+GROUP BY ed_english
+HAVING COUNT(*) > 1
+ORDER BY occurrences DESC;
+-- Result: 193 duplicate ED names found
+-- NEWTOWN appears 8 times, CASTLETOWN 8 times, KILBRIDE 7 times
+-- This confirms the hybrid join has real ambiguity at the ED name stage
+-- DISTINCT ON likely resolved most cases but county assignment
+-- for common placenames cannot be guaranteed
+
+-- ANALYSIS 11: Priority ranking for uncovered deprived areas
+-- Normalised inputs — all variables scaled 0-1 before combining
+-- Weights: distance 0.6, deprivation 0.4 — illustrative, adjustable
+WITH ranges AS (
+  SELECT
+    MIN(d.nearest_deis_distance_km) AS min_dist,
+    MAX(d.nearest_deis_distance_km) AS max_dist,
+    MIN(sa.deprivation_score) AS min_dep,
+    MAX(sa.deprivation_score) AS max_dep
+  FROM small_areas2 sa
+  JOIN distances2 d USING (sa_geogid_2022)
+  WHERE sa.deprivation_category IN (
+    'Very Disadvantaged',
+    'Extremely Disadvantaged'
+  )
+)
+SELECT
+  sa.sa_geogid_2022,
+  sa.county_english,
+  sa.deprivation_score,
+  d.nearest_deis_distance_km,
+  ROUND(
+    ((d.nearest_deis_distance_km - r.min_dist) /
+    NULLIF(r.max_dist - r.min_dist, 0) * 0.6) +
+    ((sa.deprivation_score - r.max_dep) /
+    NULLIF(r.min_dep - r.max_dep, 0) * 0.4)
+  , 3) AS priority_score
+FROM small_areas2 sa
+JOIN distances2 d USING (sa_geogid_2022)
+CROSS JOIN ranges r
+WHERE sa.deprivation_category IN (
+  'Very Disadvantaged',
+  'Extremely Disadvantaged'
+)
+AND sa.sa_geogid_2022 NOT IN (
+  SELECT sa_geogid_2022
+  FROM coverage2
+  WHERE covered_by_deis = TRUE
+)
+ORDER BY priority_score DESC;
+-- Results:
+-- A157040001 Mayo    -23.06  16.20km  0.649 (highest priority)
+-- A157114001 Mayo    -24.97  11.47km  0.504
+-- A127123005 Limerick -23.01 10.97km  0.454
+-- A127123002 Limerick -23.01 10.67km  0.443
+-- A127123004 Limerick -23.01 10.66km  0.442
+-- A127123003 Limerick -23.01 10.54km  0.438
+```
+
+Save with Cmd+S then push to GitHub:
+```
+git add .
+git commit -m "Add join audit, duplicate check and normalised priority ranking queries"
+git push origin main
